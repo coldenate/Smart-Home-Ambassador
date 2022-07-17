@@ -31,7 +31,7 @@ void setup()
   digitalWrite(output5, LOW);
   digitalWrite(output4, LOW);
   WiFiManager wifiManager;
-  wifiManager.resetSettings();
+  // wifiManager.resetSettings();
   wifiManager.setSTAStaticIPConfig(IPAddress(10, 0, 0, 101), IPAddress(10, 0, 0, 1), IPAddress(255, 255, 255, 0)); // optional DNS 4th argument
   wifiManager.autoConnect("Fan Bridge");
   Serial.println("Connected!");
