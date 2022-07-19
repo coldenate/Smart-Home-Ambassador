@@ -1,21 +1,22 @@
 #include <Arduino.h>
 
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
-
+#include <ArduinoJson.h>
 WiFiServer server(80);
 String header;
 
 // Auxiliar variables to store the current output state
-String output5State = "off";
-String output4State = "off";
+int lightstate = 0;
+int output4State = 0;
 // Assign output variables to GPIO pins
 const int output5 = 5;
 const int output4 = 4;
-
+String json;
 // Current time
 unsigned long currentTime = millis();
 // Previous time
@@ -41,11 +42,14 @@ void setup()
 void loop()
 {
   WiFiClient client = server.available(); // Listen for incoming clients
-
+  HTTPClient http;
   if (client)
-  {                                // If a new client connects,
-    Serial.println("New Client."); // print a message out in the serial port
-    String currentLine = "";       // make a String to hold incoming data from the client
+  {
+    http.begin(client, "http://10.0.0.105:8080/fanlight");
+    http.addHeader("Content-Type", "text/json"); // If a new client connects,
+    Serial.println("New Client.");               // print a message out in the serial port
+    String currentLine = "";                     // make a String to hold incoming data from the client
+    DynamicJsonDocument doc(1024);
     while (client.connected())
     { // loop while the client's connected
       if (client.available())
@@ -61,35 +65,67 @@ void loop()
           {
             // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
             // and a content-type so the client knows what's coming, then a blank line:
+
+            // make sure to process state changes up here to include in the return before client disconnection
+            Serial.println(header);
             client.println("HTTP/1.1 200 OK");
             client.println("Content-type:text/html");
             client.println("Connection: close");
             client.println();
+            if (header.startsWith("GET /light/state"))
+            {
+              Serial.println("sending state");
+              doc["characteristic"] = "On";
+              if (lightstate == 1)
+              {
+                doc["value"] = "true";
+              }
+              else
+              {
+                doc["value"] = "false";
+              }
+              serializeJson(doc, json);
+              http.POST(json);
+              // client.println("<!DOCTYPE html><html>");
+              http.end();
+            }
+            Serial.println("Did not ask for state, moving on.");
+            if (!header.startsWith("GET /light/state"))
+            {
 
-            // turns the GPIOs on and off
-            if (header.indexOf("GET /5?state=on") >= 0)
-            {
-              Serial.println("GPIO 5 on");
-              output5State = "on";
-              digitalWrite(output5, HIGH);
-            }
-            else if (header.indexOf("GET /5?state=off") >= 0)
-            {
-              Serial.println("GPIO 5 off");
-              output5State = "off";
-              digitalWrite(output5, LOW);
-            }
-            else if (header.indexOf("GET /4/on") >= 0)
-            {
-              Serial.println("GPIO 4 on");
-              output4State = "on";
-              digitalWrite(output4, HIGH);
-            }
-            else if (header.indexOf("GET /4/off") >= 0)
-            {
-              Serial.println("GPIO 4 off");
-              output4State = "off";
-              digitalWrite(output4, LOW);
+              // turns the GPIOs on and off
+              if (header.indexOf("GET /light/on") >= 0)
+              {
+                Serial.println("GPIO 5 on");
+                lightstate = 1;
+                digitalWrite(output5, HIGH);
+                delay(500);
+                digitalWrite(output5, LOW);
+              }
+              else if (header.indexOf("GET /light/off") >= 0)
+              {
+                Serial.println("GPIO 5 off");
+                lightstate = 0;
+                digitalWrite(output5, HIGH);
+                delay(500);
+                digitalWrite(output5, LOW);
+              }
+              else if (header.indexOf("GET /4?state=on") >= 0)
+              {
+                Serial.println("GPIO 4 on");
+                output4State = 1;
+                digitalWrite(output4, HIGH);
+                delay(500);
+                digitalWrite(output4, LOW);
+              }
+              else if (header.indexOf("GET /4?state=off") >= 0)
+              {
+                Serial.println("GPIO 4 off");
+                output4State = 0;
+                digitalWrite(output4, HIGH);
+                delay(500);
+                digitalWrite(output4, LOW);
+              }
             }
 
             break;
