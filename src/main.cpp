@@ -12,10 +12,10 @@ String header;
 
 // Auxiliar variables to store the current output state
 int lightstate = 0;
-int output4State = 0;
+int garageDoorState = 0;
 // Assign output variables to GPIO pins
-const int output5 = 5;
-const int output4 = 4;
+const int fanLight = 5;
+const int garageDoor = 4;
 String json;
 // Current time
 unsigned long currentTime = millis();
@@ -26,11 +26,11 @@ const long timeoutTime = 2000;
 void setup()
 {
   Serial.begin(9600);
-  pinMode(output5, OUTPUT);
-  pinMode(output4, OUTPUT);
+  pinMode(fanLight, OUTPUT);
+  pinMode(garageDoor, OUTPUT);
   // set outputs to low
-  digitalWrite(output5, LOW);
-  digitalWrite(output4, LOW);
+  digitalWrite(fanLight, LOW);
+  digitalWrite(garageDoor, LOW);
   WiFiManager wifiManager;
   // wifiManager.resetSettings();
   wifiManager.setSTAStaticIPConfig(IPAddress(10, 0, 0, 101), IPAddress(10, 0, 0, 1), IPAddress(255, 255, 255, 0)); // optional DNS 4th argument
@@ -45,8 +45,7 @@ void loop()
   HTTPClient http;
   if (client)
   {
-    http.begin(client, "http://10.0.0.105:8080/fanlight");
-    http.addHeader("Content-Type", "text/json"); // If a new client connects,
+     // If a new client connects,
     Serial.println("New Client.");               // print a message out in the serial port
     String currentLine = "";                     // make a String to hold incoming data from the client
     DynamicJsonDocument doc(1024);
@@ -67,14 +66,16 @@ void loop()
             // and a content-type so the client knows what's coming, then a blank line:
 
             // make sure to process state changes up here to include in the return before client disconnection
-            Serial.println(header);
+            // Serial.println(header);
             client.println("HTTP/1.1 200 OK");
             client.println("Content-type:text/html");
             client.println("Connection: close");
             client.println();
             if (header.startsWith("GET /light/state"))
             {
-              Serial.println("sending state");
+              http.begin(client, "http://10.0.0.105:8080/fanlight");
+              http.addHeader("Content-Type", "text/json");
+              // Serial.println("sending state");
               doc["characteristic"] = "On";
               if (lightstate == 1)
               {
@@ -89,43 +90,73 @@ void loop()
               // client.println("<!DOCTYPE html><html>");
               http.end();
             }
-            Serial.println("Did not ask for state, moving on.");
+            if (header.startsWith("GET /garagedoor/state"))
+            {
+              http.begin(client, "http://10.0.0.105:8080/garage");
+              http.addHeader("Content-Type", "text/json");
+              doc["characteristic"] = "On";
+              if (garageDoorState == 1)
+              {
+                doc["value"] = "true";
+              }
+              else
+              {
+                doc["value"] = "false";
+              }
+              serializeJson(doc, json);
+              http.POST(json);
+              http.end();
+            }
+            // Serial.println("Did not ask for state, moving on.");
             if (!header.startsWith("GET /light/state"))
             {
 
               // turns the GPIOs on and off
               if (header.indexOf("GET /light/on") >= 0)
               {
-                Serial.println("GPIO 5 on");
+                // Serial.println("GPIO 5 on");
                 lightstate = 1;
-                digitalWrite(output5, HIGH);
+                digitalWrite(fanLight, HIGH);
                 delay(500);
-                digitalWrite(output5, LOW);
+                digitalWrite(fanLight, LOW);
               }
               else if (header.indexOf("GET /light/off") >= 0)
               {
-                Serial.println("GPIO 5 off");
+                // Serial.println("GPIO 5 off");
                 lightstate = 0;
-                digitalWrite(output5, HIGH);
+                digitalWrite(fanLight, HIGH);
                 delay(500);
-                digitalWrite(output5, LOW);
+                digitalWrite(fanLight, LOW);
               }
-              else if (header.indexOf("GET /4?state=on") >= 0)
+              else if (header.indexOf("GET /garagedoor/on") >= 0)
               {
                 Serial.println("GPIO 4 on");
-                output4State = 1;
-                digitalWrite(output4, HIGH);
-                delay(500);
-                digitalWrite(output4, LOW);
+                garageDoorState = 1;
+                digitalWrite(garageDoor, HIGH);
+                delay(800);
+                digitalWrite(garageDoor, LOW);
               }
-              else if (header.indexOf("GET /4?state=off") >= 0)
+              else if (header.indexOf("GET /garagedoor/off") >= 0)
               {
                 Serial.println("GPIO 4 off");
-                output4State = 0;
-                digitalWrite(output4, HIGH);
-                delay(500);
-                digitalWrite(output4, LOW);
+                garageDoorState = 0;
+                digitalWrite(garageDoor, HIGH);
+                delay(800);
+                digitalWrite(garageDoor, LOW);
               }
+              else
+              {
+                Serial.println("Unknown command");
+              }
+
+              // else if (header.indexOf("GET /garagedoor/toggle") >= 0)
+              // {
+              //   Serial.println("GPIO 4 off");
+              //   output4State = 0;
+              //   digitalWrite(output4, HIGH);
+              //   delay(500);
+              //   digitalWrite(output4, LOW);
+              // }
             }
 
             break;
@@ -145,7 +176,7 @@ void loop()
     header = "";
     // Close the connection
     client.stop();
-    Serial.println("Client disconnected.");
-    Serial.println("");
+    // Serial.println("Client disconnected.");
+    // Serial.println("");
   }
 }
