@@ -7,22 +7,35 @@
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
+#include <string>
 WiFiServer server(80);
+WiFiServer server2(79);
 String header;
 
 // Auxiliar variables to store the current output state
 int lightstate = 0;
-int garageDoorState = 0;
+// int garageDoorState = 1;
+int currentGarageDoorState = 1;      // 0 is open, 1 is closed, 2 is opening, and 3 is closing
+int currentGarageDoorStateLocal = 1; // 0 is open, 1 is closed, 2 is opening, and 3 is closing
+int targetGarageDoorState = 1;
 // Assign output variables to GPIO pins
 const int fanLight = 5;
 const int garageDoor = 4;
-String json;
+
 // Current time
 unsigned long currentTime = millis();
 // Previous time
 unsigned long previousTime = 0;
 // Define timeout time in milliseconds (example: 2000ms = 2s)
 const long timeoutTime = 2000;
+int ipayload;
+void buttonPress(int pin)
+{
+  digitalWrite(pin, HIGH);
+  delay(800);
+  digitalWrite(pin, LOW);
+}
+
 void setup()
 {
   Serial.begin(9600);
@@ -37,24 +50,41 @@ void setup()
   wifiManager.autoConnect("Fan Bridge");
   Serial.println("Connected!");
   server.begin();
+  server2.begin();
 }
 
 void loop()
 {
-  WiFiClient client = server.available(); // Listen for incoming clients
   HTTPClient http;
+  WiFiClient client = server.available();   // Listen for incoming clients
+  WiFiClient client2 = server2.available(); // Listen for incoming clients
+  // run pre-client http services
+  http.begin(client2, "http://10.0.0.102:80/status");
+  // Serial.println("Requesting /status...");
+  http.GET();
+
+  String payload = http.getString();
+
+  http.end(); // this has gotten the currentgarage door state from a watchdog service
+
+  int ipayload = payload.toInt();
+  currentGarageDoorState = ipayload;
+
+  HTTPClient althttp;
   if (client)
   {
-     // If a new client connects,
-    Serial.println("New Client.");               // print a message out in the serial port
-    String currentLine = "";                     // make a String to hold incoming data from the client
+
+    // If a new client connects,
+    Serial.println("New Client."); // print a message out in the serial port
+    String currentLine = "";       // make a String to hold incoming data from the client
     DynamicJsonDocument doc(1024);
+    String json;
     while (client.connected())
     { // loop while the client's connected
       if (client.available())
       {                         // if there's bytes to read from the client,
         char c = client.read(); // read a byte, then
-        Serial.write(c);        // print it out the serial monitor
+        // Serial.write(c);        // print it out the serial monitor
         header += c;
         if (c == '\n')
         { // if the byte is a newline character
@@ -66,18 +96,37 @@ void loop()
             // and a content-type so the client knows what's coming, then a blank line:
 
             // make sure to process state changes up here to include in the return before client disconnection
-            // Serial.println(header);
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println("Connection: close");
-            client.println();
+            Serial.println(header);
+            if (header.startsWith("GET /status"))
+            {
+              Serial.println("GETing /status... haha");
+              client.println("HTTP/1.1 200 OK");
+
+              client.println("Content-type:text/json");
+              client.println("Connection: close");
+
+              Serial.println(ipayload);
+              doc["currentDoorState"] = currentGarageDoorState;
+              doc["targetDoorState"] = targetGarageDoorState;
+              client.println();
+              serializeJson(doc, json);
+              client.println(json);
+              Serial.println("closing connection");
+            }
+            else
+            {
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-type:text/html");
+              client.println("Connection: close");
+              client.println();
+            }
             if (header.startsWith("GET /light/state"))
             {
               http.begin(client, "http://10.0.0.105:8080/fanlight");
               http.addHeader("Content-Type", "text/json");
               // Serial.println("sending state");
               doc["characteristic"] = "On";
-              if (lightstate == 1)
+              if (lightstate == 0)
               {
                 doc["value"] = "true";
               }
@@ -95,7 +144,7 @@ void loop()
               http.begin(client, "http://10.0.0.105:8080/garage");
               http.addHeader("Content-Type", "text/json");
               doc["characteristic"] = "On";
-              if (garageDoorState == 1)
+              if (currentGarageDoorState == 0)
               {
                 doc["value"] = "true";
               }
@@ -107,6 +156,7 @@ void loop()
               http.POST(json);
               http.end();
             }
+
             // Serial.println("Did not ask for state, moving on.");
             if (!header.startsWith("GET /light/state"))
             {
@@ -115,7 +165,7 @@ void loop()
               if (header.indexOf("GET /light/on") >= 0)
               {
                 // Serial.println("GPIO 5 on");
-                lightstate = 1;
+                lightstate = 0;
                 digitalWrite(fanLight, HIGH);
                 delay(500);
                 digitalWrite(fanLight, LOW);
@@ -123,15 +173,64 @@ void loop()
               else if (header.indexOf("GET /light/off") >= 0)
               {
                 // Serial.println("GPIO 5 off");
-                lightstate = 0;
+                lightstate = 1;
                 digitalWrite(fanLight, HIGH);
                 delay(500);
                 digitalWrite(fanLight, LOW);
               }
+              else if (header.indexOf("GET /setTargetDoorState") >= 0)
+              {
+                char a = header.charAt(header.indexOf("/") + 1);
+                int ia = a - '0'; // converts char to int!! but only works for one char
+                targetGarageDoorState = ia;
+                buttonPress(garageDoor);
+                while (true)
+                {
+                  althttp.begin(client, "http://10.0.0.102:80/status");
+
+                  althttp.GET();
+
+                  String payload = althttp.getString();
+
+                  althttp.end(); // this has gotten the currentgarage door state from a watchdog service
+
+                  int ipayload = payload.toInt();
+                  currentGarageDoorStateLocal = ipayload;
+                  ipayload += 2;
+                  // if it is 0 (meaning open), then we set it to 2 meaning it is opening
+                  // if it is 1 (meaning closed), then we set it to 3 meaning it is closing
+                  payload = String(ipayload);
+                  http.begin(client, "http://10.0.0.105:2000/currentDoorState?value=" + payload);
+                  http.POST(" ");
+                  http.end();
+                  if (currentGarageDoorStateLocal == targetGarageDoorState)
+                  {
+                    break;
+                  }
+                  delay(600);
+                }
+                http.begin(client, "http://10.0.0.105:2000/targetDoorState?value=" + targetGarageDoorState);
+              }
+              // else if (header.indexOf("GET /setTargetDoorState/0") >= 0)
+              // {
+              //   Serial.println("GPIO 4 on");
+              //   garageDoorState = 1;
+              //   digitalWrite(garageDoor, HIGH);
+              //   delay(800);
+              //   digitalWrite(garageDoor, LOW);
+              // }
+              // else if (header.indexOf("GET /currentDoorState?") >= 0)
+              // {
+              //   Serial.println("GPIO 4 on");
+              //   int x = header.charAt(header.indexOf("=") + 1);
+              //   garageDoorState = x;
+              //   Serial.println(x);
+              // }
+
               else if (header.indexOf("GET /garagedoor/on") >= 0)
               {
                 Serial.println("GPIO 4 on");
-                garageDoorState = 1;
+                // garageDoorState = 0;
                 digitalWrite(garageDoor, HIGH);
                 delay(800);
                 digitalWrite(garageDoor, LOW);
@@ -139,7 +238,24 @@ void loop()
               else if (header.indexOf("GET /garagedoor/off") >= 0)
               {
                 Serial.println("GPIO 4 off");
-                garageDoorState = 0;
+                // garageDoorState = 1;
+                digitalWrite(garageDoor, HIGH);
+                delay(800);
+                digitalWrite(garageDoor, LOW);
+              }
+              else if (header.indexOf("GET /garagedoor/toggle") >= 0)
+              {
+                Serial.println("GPIO 4 toggle");
+                // inverse state
+                // if (garageDoorState == 1)
+                // {
+                //   garageDoorState = 0;
+                // }
+                // else if (garageDoorState == 0)
+                // {
+                //   garageDoorState = 1;
+                // }
+
                 digitalWrite(garageDoor, HIGH);
                 delay(800);
                 digitalWrite(garageDoor, LOW);
