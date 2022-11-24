@@ -86,77 +86,47 @@ void loop()
         header += c;
         if (c == '\n')
         { // if the byte is a newline character
+          // Serial.println(header);
           // if the current line is blank, you got two newline characters in a row.
           // that's the end of the client HTTP request, so send a response:
           if (currentLine.length() == 0)
           {
-            http.begin(client2, "http://10.0.0.102:80/status");
-            // Serial.println("Requesting /status...");
-            http.GET();
 
-            String payload = http.getString();
-
-            http.end(); // this has gotten the currentgarage door state from a watchdog service
-
-            StaticJsonDocument<96> doc;
-
-            DeserializationError error = deserializeJson(doc, payload);
-
-            if (error)
+            if (header.startsWith("GET /status") || header.startsWith("GET /garagedoor"))
             {
-              Serial.print(F("deserializeJson() failed: "));
-              Serial.println(error.f_str());
-              return;
+              http.begin(client2, "http://10.0.0.102:80/status");
+              // Serial.println("Requesting /status...");
+              http.GET();
+
+              String payload = http.getString();
+
+              http.end(); // this has gotten the currentgarage door state from a watchdog service
+
+              StaticJsonDocument<96> doc;
+              DeserializationError error = deserializeJson(doc, payload);
+
+              if (error)
+              {
+                // if the header does not startsWith "GET /status" or "GET /garagedoor", ignore the error and contine
+
+                Serial.print(F("deserializeJson() failed: "));
+                Serial.println(error.f_str());
+                return;
+                currentGarageDoorState = doc["currentDoorState"]; // 0 or 1
+                // targetGarageDoorState = currentGarageDoorState;   // 0 or 1
+                if (currentGarageDoorState == 1)
+                {
+                  targetGarageDoorState = 1;
+                }
+                if (currentGarageDoorState == 0)
+                {
+                  targetGarageDoorState = 0;
+                }
+                Serial.println("Setting target door state to:");
+                Serial.println(targetGarageDoorState);
+              }
             }
 
-            currentGarageDoorState = doc["currentDoorState"]; // 0 or 1
-            // targetGarageDoorState = currentGarageDoorState;   // 0 or 1
-            if (currentGarageDoorState == 1)
-            {
-              targetGarageDoorState = 1;
-            }
-            if (currentGarageDoorState == 0)
-            {
-              targetGarageDoorState = 0;
-            }
-            Serial.println("Setting target door state to:");
-            Serial.println(targetGarageDoorState);
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-
-            // make sure to process state changes up here to include in the return before client disconnection
-
-            // if (header.startsWith("POST /status/update"))
-            // {
-            //   String input = client.readString();
-            //   // String input;
-
-            //   StaticJsonDocument<96> doc;
-
-            //   DeserializationError error = deserializeJson(doc, input);
-
-            //   if (error)
-            //   {
-            //     Serial.print(F("deserializeJson() failed: "));
-            //     Serial.println(error.f_str());
-            //     return;
-            //   }
-
-            //   currentGarageDoorState = doc["currentDoorState"]; // 0 or 1
-            //   // targetGarageDoorState = currentGarageDoorState;   // 0 or 1
-            //   if (currentGarageDoorState == 1)
-            //   {
-            //     targetGarageDoorState = 1;
-            //   }
-            //   if (currentGarageDoorState == 0)
-            //   {
-            //     targetGarageDoorState = 0;
-            //   }
-            //   Serial.println("Setting target door state to:");
-            //   Serial.println(targetGarageDoorState);
-            //   // targetGarageDoorState = doc["targetDoorState"];   // 1
-            //   // Serial.println out the two states
-            // }
             if (header.startsWith("GET /status"))
             {
               Serial.println("GETing /status... haha");
@@ -224,6 +194,7 @@ void loop()
               // turns the GPIOs on and off
               if (header.indexOf("GET /light/on") >= 0)
               {
+
                 // Serial.println("GPIO 5 on");
                 lightstate = 0;
                 digitalWrite(fanLight, HIGH);
